@@ -63,7 +63,7 @@ const processAudio = async (backgroundPath, narrationPath, outputPath, totalDura
             .input(delayedNarrationPath)
             .complexFilter([
                 `[0:a]volume=1:enable='between(t,0,5)',volume=0.3:enable='between(t,5,${totalDuration-5})',volume=1:enable='gt(t,${totalDuration-5})'[background]`,
-                '[1:a]volume=1.25[narration]',
+                '[1:a]volume=1.3[narration]',
                 '[background][narration]amix=inputs=2:duration=first'
             ])
             .duration(totalDuration)
@@ -86,12 +86,18 @@ app.post('/upload', async (req, res) => {
             return res.status(400).json({ error: 'Nenhum arquivo foi enviado' });
         }
 
-        // Gera nomes únicos para os arquivos
+        // Formata a data para o nome do arquivo
+        const homiliaDate = new Date(req.body.homiliaDate);
+        const months = ['janeiro', 'fevereiro', 'marco', 'abril', 'maio', 'junho', 'julho', 'agosto', 'setembro', 'outubro', 'novembro', 'dezembro'];
+        const formattedDate = `${homiliaDate.getDate()}_${months[homiliaDate.getMonth()]}_${homiliaDate.getFullYear()}`;
+        const outputFilename = `homilia_${formattedDate}`;
+
+        // Gera nomes únicos para os arquivos temporários
         const timestamp = Date.now();
         const backgroundTrackPath = path.join(uploadsDir, `background_${timestamp}.mp3`);
         const narrationPath = path.join(uploadsDir, `narration_${timestamp}.mp3`);
         const coverMediaPath = path.join(uploadsDir, `cover_${timestamp}${path.extname(req.files.coverMedia.name)}`);
-        const outputPath = path.join(uploadsDir, `output_${timestamp}.mp4`);
+        const outputPath = path.join(uploadsDir, `${outputFilename}.mp4`);
         const combinedAudioPath = path.join(uploadsDir, `combined_${timestamp}.mp3`);
 
         tempFiles.push(
@@ -179,7 +185,7 @@ app.post('/upload', async (req, res) => {
         });
 
         console.log('Processo concluído com sucesso');
-        const videoUrl = `/uploads/output_${timestamp}.mp4`;
+        const videoUrl = `/uploads/${outputFilename}.mp4`;
         res.json({ videoUrl });
 
     } catch (error) {
