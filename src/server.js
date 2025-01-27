@@ -7,7 +7,6 @@ const fs = require('fs');
 const app = express();
 const port = 3000;
 
-// Configuração dos middlewares
 app.use(express.static('public'));
 app.use(fileUpload({
     createParentPath: true,
@@ -63,8 +62,9 @@ const processAudio = async (backgroundPath, narrationPath, outputPath, totalDura
             .inputOptions(['-stream_loop -1'])
             .input(delayedNarrationPath)
             .complexFilter([
-                '[0:a]volume=0.2[background]',
-                '[background][1:a]amix=inputs=2:duration=first'
+                `[0:a]volume=1:enable='between(t,0,5)',volume=0.3:enable='between(t,5,${totalDuration-5})',volume=1:enable='gt(t,${totalDuration-5})'[background]`,
+                '[1:a]volume=1.25[narration]',
+                '[background][narration]amix=inputs=2:duration=first'
             ])
             .duration(totalDuration)
             .on('error', (err) => {

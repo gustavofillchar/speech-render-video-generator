@@ -1,10 +1,11 @@
 {
-  "name": "homilias",
+  "name": "homilias-gerador",
   "version": "1.0.0",
   "description": "Aplicação para combinar áudio e imagem em vídeo",
   "main": "src/server.js",
   "scripts": {
-    "start": "node src/server.js"
+    "start": "node src/server.js",
+    "dev": "node --watch src/server.js"
   },
   "dependencies": {
     "express": "^4.18.2",

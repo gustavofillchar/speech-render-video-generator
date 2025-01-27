@@ -39,9 +39,36 @@
             border: none;
             border-radius: 4px;
             cursor: pointer;
+            transition: all 0.3s ease;
         }
         button:hover {
             background-color: #45a049;
+        }
+        button:disabled {
+            background-color: #cccccc;
+            cursor: not-allowed;
+        }
+        .processing {
+            display: none;
+            align-items: center;
+            gap: 10px;
+            color: #666;
+            margin-top: 10px;
+        }
+        .processing.visible {
+            display: flex;
+        }
+        .spinner {
+            width: 20px;
+            height: 20px;
+            border: 3px solid #f3f3f3;
+            border-top: 3px solid #3498db;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
         }
         #status {
             margin-top: 20px;
@@ -65,7 +92,7 @@
     </style>
 </head>
 <body>
-    <h1>Gerador de Vídeo com Áudio</h1>
+    <h1>Gerador de Vídeo com Áudio (Homilias)</h1>
     <div class="upload-form">
         <form id="uploadForm" enctype="multipart/form-data">
             <div class="form-group">
@@ -81,17 +108,29 @@
                 <input type="file" id="coverMedia" name="coverMedia" accept="image/*,video/*" required>
                 <p class="info-text">Aceita imagens (JPG, PNG) ou vídeos sem áudio (MP4, MOV). O vídeo será reproduzido em loop sem som.</p>
             </div>
-            <button type="submit">Gerar Vídeo</button>
+            <button type="submit" id="submitButton">Gerar Vídeo</button>
+            <div class="processing" id="processingIndicator">
+                <div class="spinner"></div>
+                <span>Processando vídeo...</span>
+            </div>
         </form>
         <div id="status"></div>
         <a id="downloadLink" href="#" download>Baixar Vídeo</a>
     </div>
 
     <script>
-        document.getElementById('uploadForm').addEventListener('submit', async (e) => {
+        const form = document.getElementById('uploadForm');
+        const submitButton = document.getElementById('submitButton');
+        const processingIndicator = document.getElementById('processingIndicator');
+        const status = document.getElementById('status');
+        const downloadLink = document.getElementById('downloadLink');
+
+        form.addEventListener('submit', async (e) => {
             e.preventDefault();
-            const status = document.getElementById('status');
-            const downloadLink = document.getElementById('downloadLink');
+            
+            // Desabilita o botão e mostra o indicador de processamento
+            submitButton.disabled = true;
+            processingIndicator.classList.add('visible');
             status.textContent = 'Processando...';
             status.style.backgroundColor = '#fff3cd';
             downloadLink.style.display = 'none';
@@ -116,7 +155,23 @@
             } catch (error) {
                 status.textContent = 'Erro ao processar o vídeo: ' + error.message;
                 status.style.backgroundColor = '#f8d7da';
+                // Reativa o botão em caso de erro
+                submitButton.disabled = false;
+            } finally {
+                // Esconde o indicador de processamento
+                processingIndicator.classList.remove('visible');
             }
+        });
+
+        // Reativa o botão quando novos arquivos são selecionados
+        const fileInputs = form.querySelectorAll('input[type="file"]');
+        fileInputs.forEach(input => {
+            input.addEventListener('change', () => {
+                submitButton.disabled = false;
+                status.textContent = '';
+                status.style.backgroundColor = 'transparent';
+                downloadLink.style.display = 'none';
+            });
         });
     </script>
 </body>
