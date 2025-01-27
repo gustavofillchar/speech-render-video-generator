@@ -24,7 +24,63 @@ app.get('/', (req, res) => {
     res.sendFile(path.join(__dirname, '../views/index.html'));
 });
 
+// Função para verificar se um arquivo é um vídeo
+function isVideo(filename) {
+    const videoExtensions = ['.mp4', '.mov', '.avi', '.mkv'];
+    const ext = path.extname(filename).toLowerCase();
+    return videoExtensions.includes(ext);
+}
+
+// Função para obter a duração de um arquivo de mídia
+const getMediaDuration = (filePath) => {
+    return new Promise((resolve, reject) => {
+        ffmpeg.ffprobe(filePath, (err, metadata) => {
+            if (err) reject(err);
+            resolve(metadata.format.duration);
+        });
+    });
+};
+
+// Função para processar o áudio em etapas
+const processAudio = async (backgroundPath, narrationPath, outputPath, totalDuration) => {
+    // Primeiro, adiciona o delay à narração
+    const delayedNarrationPath = path.join(uploadsDir, `delayed_${Date.now()}.mp3`);
+    
+    await new Promise((resolve, reject) => {
+        ffmpeg()
+            .input(narrationPath)
+            .audioFilters(`adelay=5000|5000`)
+            .duration(totalDuration)
+            .on('error', reject)
+            .on('end', resolve)
+            .save(delayedNarrationPath);
+    });
+
+    // Depois, combina os áudios com volume ajustado
+    await new Promise((resolve, reject) => {
+        ffmpeg()
+            .input(backgroundPath)
+            .inputOptions(['-stream_loop -1'])
+            .input(delayedNarrationPath)
+            .complexFilter([
+                '[0:a]volume=0.2[background]',
+                '[background][1:a]amix=inputs=2:duration=first'
+            ])
+            .duration(totalDuration)
+            .on('error', (err) => {
+                fs.unlinkSync(delayedNarrationPath);
+                reject(err);
+            })
+            .on('end', () => {
+                fs.unlinkSync(delayedNarrationPath);
+                resolve();
+            })
+            .save(outputPath);
+    });
+};
+
 app.post('/upload', async (req, res) => {
+    const tempFiles = [];
     try {
         if (!req.files || Object.keys(req.files).length === 0) {
             return res.status(400).json({ error: 'Nenhum arquivo foi enviado' });
@@ -34,92 +90,109 @@ app.post('/upload', async (req, res) => {
         const timestamp = Date.now();
         const backgroundTrackPath = path.join(uploadsDir, `background_${timestamp}.mp3`);
         const narrationPath = path.join(uploadsDir, `narration_${timestamp}.mp3`);
-        const imagePath = path.join(uploadsDir, `cover_${timestamp}.jpg`);
+        const coverMediaPath = path.join(uploadsDir, `cover_${timestamp}${path.extname(req.files.coverMedia.name)}`);
         const outputPath = path.join(uploadsDir, `output_${timestamp}.mp4`);
         const combinedAudioPath = path.join(uploadsDir, `combined_${timestamp}.mp3`);
 
-        // Move os arquivos enviados para a pasta de uploads
+        tempFiles.push(
+            backgroundTrackPath,
+            narrationPath,
+            coverMediaPath,
+            combinedAudioPath
+        );
+
+        console.log('Movendo arquivos enviados...');
         await req.files.backgroundTrack.mv(backgroundTrackPath);
         await req.files.narration.mv(narrationPath);
-        await req.files.coverImage.mv(imagePath);
+        await req.files.coverMedia.mv(coverMediaPath);
 
-        // Primeiro, vamos obter a duração do arquivo de narração
-        const getNarrationDuration = () => {
-            return new Promise((resolve, reject) => {
-                ffmpeg.ffprobe(narrationPath, (err, metadata) => {
-                    if (err) reject(err);
-                    resolve(metadata.format.duration);
-                });
-            });
-        };
-
-        const narrationDuration = await getNarrationDuration();
+        console.log('Obtendo duração da narração...');
+        const narrationDuration = await getMediaDuration(narrationPath);
         const totalDuration = narrationDuration + 10; // 5 segundos antes + 5 segundos depois
 
-        // Combina os áudios com o delay especificado e controle de volume dinâmico
-        await new Promise((resolve, reject) => {
-            ffmpeg()
-                .input(backgroundTrackPath)
-                .inputOptions(['-stream_loop -1']) // Loop na música de fundo
-                .input(narrationPath)
-                .complexFilter([
-                    // Cria uma curva de volume para a música de fundo
-                    // Começa em volume normal (1.0), diminui suavemente em 1 segundo quando a narração começa,
-                    // mantém baixo durante a narração, e aumenta suavemente em 1 segundo quando a narração termina
-                    `[0:a]volume=enable='between(t,0,4)':volume=1,\
-volume=enable='between(t,4,5)':volume='1-((t-4)/1)',\
-volume=enable='between(t,5,${narrationDuration + 5})':volume=0.2,\
-volume=enable='between(t,${narrationDuration + 5},${narrationDuration + 6})':volume='0.2+((t-${narrationDuration + 5})/1)*0.8',\
-volume=enable='between(t,${narrationDuration + 6},${totalDuration})':volume=1[background]`,
-                    
-                    // Adiciona 5 segundos de silêncio no início da narração
-                    '[1:a]adelay=5000|5000[delayed_narration]',
-                    
-                    // Combina a trilha de fundo com a narração atrasada
-                    '[background][delayed_narration]amix=inputs=2:duration=first[audio]',
-                    
-                    // Adiciona 5 segundos de silêncio no final
-                    '[audio]apad=pad_dur=5[final_audio]'
-                ])
-                .map('[final_audio]')
-                .duration(totalDuration)
-                .save(combinedAudioPath)
-                .on('end', resolve)
-                .on('error', reject);
+        console.log('Processando áudio...');
+        await processAudio(backgroundTrackPath, narrationPath, combinedAudioPath, totalDuration);
+
+        console.log('Processando vídeo/imagem...');
+        if (isVideo(coverMediaPath)) {
+            console.log('Arquivo é um vídeo, processando...');
+            await new Promise((resolve, reject) => {
+                ffmpeg()
+                    .input(coverMediaPath)
+                    .inputOptions(['-stream_loop -1'])
+                    .input(combinedAudioPath)
+                    .outputOptions([
+                        '-c:v libx264',
+                        '-preset medium',
+                        '-tune film',
+                        '-c:a aac',
+                        '-b:a 192k',
+                        '-pix_fmt yuv420p',
+                        '-movflags +faststart',
+                        `-t ${totalDuration}`
+                    ])
+                    .output(outputPath)
+                    .on('start', (commandLine) => {
+                        console.log('Comando FFmpeg:', commandLine);
+                    })
+                    .on('progress', (progress) => {
+                        console.log('Progresso:', progress);
+                    })
+                    .on('end', () => {
+                        console.log('Processamento de vídeo concluído');
+                        resolve();
+                    })
+                    .on('error', (err) => {
+                        console.error('Erro no processamento do vídeo:', err);
+                        reject(err);
+                    })
+                    .run();
+            });
+        } else {
+            console.log('Arquivo é uma imagem, processando...');
+            await new Promise((resolve, reject) => {
+                ffmpeg()
+                    .input(coverMediaPath)
+                    .inputOptions(['-loop 1'])
+                    .input(combinedAudioPath)
+                    .outputOptions([
+                        '-c:v libx264',
+                        '-tune stillimage',
+                        '-c:a aac',
+                        '-b:a 192k',
+                        '-pix_fmt yuv420p',
+                        '-movflags +faststart',
+                        `-t ${totalDuration}`
+                    ])
+                    .output(outputPath)
+                    .on('end', resolve)
+                    .on('error', reject)
+                    .run();
+            });
+        }
+
+        console.log('Limpando arquivos temporários...');
+        tempFiles.forEach(file => {
+            if (fs.existsSync(file)) {
+                fs.unlinkSync(file);
+            }
         });
 
-        // Cria o vídeo final combinando a imagem com o áudio
-        await new Promise((resolve, reject) => {
-            ffmpeg()
-                .input(imagePath)
-                .inputOptions(['-loop 1', `-t ${totalDuration}`]) // Define a duração da imagem
-                .input(combinedAudioPath)
-                .outputOptions([
-                    '-c:v libx264',
-                    '-tune stillimage',
-                    '-c:a aac',
-                    '-b:a 192k',
-                    '-pix_fmt yuv420p',
-                    '-movflags +faststart'
-                ])
-                .output(outputPath)
-                .on('end', resolve)
-                .on('error', reject)
-                .run();
-        });
-
-        // Limpa os arquivos temporários
-        fs.unlinkSync(backgroundTrackPath);
-        fs.unlinkSync(narrationPath);
-        fs.unlinkSync(combinedAudioPath);
-
-        // Retorna o URL para download do vídeo
+        console.log('Processo concluído com sucesso');
         const videoUrl = `/uploads/output_${timestamp}.mp4`;
         res.json({ videoUrl });
 
     } catch (error) {
-        console.error('Erro:', error);
-        res.status(500).json({ error: 'Erro ao processar os arquivos' });
+        console.error('Erro detalhado:', error);
+        console.error('Stack trace:', error.stack);
+        
+        tempFiles.forEach(file => {
+            if (fs.existsSync(file)) {
+                fs.unlinkSync(file);
+            }
+        });
+        
+        res.status(500).json({ error: 'Erro ao processar os arquivos: ' + error.message });
     }
 });
 
