@@ -56,19 +56,28 @@ app.post('/upload', async (req, res) => {
         const narrationDuration = await getNarrationDuration();
         const totalDuration = narrationDuration + 10; // 5 segundos antes + 5 segundos depois
 
-        // Combina os áudios com o delay especificado
+        // Combina os áudios com o delay especificado e controle de volume dinâmico
         await new Promise((resolve, reject) => {
             ffmpeg()
                 .input(backgroundTrackPath)
                 .inputOptions(['-stream_loop -1']) // Loop na música de fundo
                 .input(narrationPath)
                 .complexFilter([
+                    // Cria uma curva de volume para a música de fundo
+                    // Começa em volume normal (1.0), diminui suavemente em 1 segundo quando a narração começa,
+                    // mantém baixo durante a narração, e aumenta suavemente em 1 segundo quando a narração termina
+                    `[0:a]volume=enable='between(t,0,4)':volume=1,\
+volume=enable='between(t,4,5)':volume='1-((t-4)/1)',\
+volume=enable='between(t,5,${narrationDuration + 5})':volume=0.2,\
+volume=enable='between(t,${narrationDuration + 5},${narrationDuration + 6})':volume='0.2+((t-${narrationDuration + 5})/1)*0.8',\
+volume=enable='between(t,${narrationDuration + 6},${totalDuration})':volume=1[background]`,
+                    
                     // Adiciona 5 segundos de silêncio no início da narração
                     '[1:a]adelay=5000|5000[delayed_narration]',
-                    // Ajusta o volume da música de fundo para 20%
-                    '[0:a]volume=0.2[background]',
+                    
                     // Combina a trilha de fundo com a narração atrasada
                     '[background][delayed_narration]amix=inputs=2:duration=first[audio]',
+                    
                     // Adiciona 5 segundos de silêncio no final
                     '[audio]apad=pad_dur=5[final_audio]'
                 ])
