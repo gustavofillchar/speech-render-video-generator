@@ -87,7 +87,7 @@ app.post('/upload', async (req, res) => {
         }
 
         // Formata a data para o nome do arquivo
-        const homiliaDate = new Date(req.body.homiliaDate);
+        const homiliaDate = new Date(req.body.homiliaDate + 'T12:00:00');
         const months = ['janeiro', 'fevereiro', 'marco', 'abril', 'maio', 'junho', 'julho', 'agosto', 'setembro', 'outubro', 'novembro', 'dezembro'];
         const formattedDate = `${homiliaDate.getDate()}_${months[homiliaDate.getMonth()]}_${homiliaDate.getFullYear()}`;
         const outputFilename = `homilia_${formattedDate}`;
@@ -135,7 +135,9 @@ app.post('/upload', async (req, res) => {
                         '-b:a 192k',
                         '-pix_fmt yuv420p',
                         '-movflags +faststart',
-                        `-t ${totalDuration}`
+                        `-t ${totalDuration}`,
+                        '-map 0:v:0',  // pega apenas o vídeo do primeiro input
+                        '-map 1:a:0'   // pega o áudio do segundo input (áudio combinado)
                     ])
                     .output(outputPath)
                     .on('start', (commandLine) => {
